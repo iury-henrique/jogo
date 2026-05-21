@@ -497,7 +497,50 @@ function beats(a, b) {
 }
 
 let model, webcam, classes;
+const playerHistory = [];
+const cpuHistory = [];
+
+function cpuPickSmart() {
+  const choices = ["pedra","papel","tesoura"];
+
+  // Primeiras 3 rodadas: sempre aleatório
+  if (playerHistory.length < 3) return choices[Math.floor(Math.random() * 3)];
+
+  // Se o CPU repetiu a mesma jogada 2x seguidas, força mudança obrigatória
+  const lastCpu = cpuHistory.slice(-2);
+  const cpuRepeating = lastCpu.length === 2 && lastCpu[0] === lastCpu[1];
+  if (cpuRepeating) {
+    const others = choices.filter(c => c !== lastCpu[lastCpu.length - 1]);
+    return others[Math.floor(Math.random() * others.length)];
+  }
+
+  // Se o jogador também está repetindo muito, aumenta aleatoriedade do CPU
+  const lastPlayer = playerHistory.slice(-4);
+  const allSame = lastPlayer.every(p => p === lastPlayer[0]);
+  if (allSame && Math.random() < 0.5) {
+    return choices[Math.floor(Math.random() * 3)];
+  }
+
+  // Analisa frequência das últimas 6 jogadas do jogador
+  const freq = { pedra:0, papel:0, tesoura:0 };
+  playerHistory.slice(-6).forEach(p => { if (freq[p] !== undefined) freq[p]++; });
+  const sorted = Object.entries(freq).sort((a,b) => b[1]-a[1]);
+  const mostUsed = sorted[0][0];
+
+  // O que bate a jogada mais usada
+  const counter = { pedra:"papel", papel:"tesoura", tesoura:"pedra" };
+  let pick = counter[mostUsed];
+
+  // 30% de jogada aleatória para ser imprevisível mesmo aprendendo
+  if (Math.random() < 0.30) {
+    pick = choices[Math.floor(Math.random() * 3)];
+  }
+
+  return pick;
+}
 let scores = { player:0, tie:0, cpu:0 };
+  playerHistory.length = 0;
+  cpuHistory.length = 0;
 let currentPred = null;
 let gameRunning = false;
 let autoMode = false;
@@ -606,7 +649,9 @@ async function playRound() {
 
   // Capture player & cpu
   const player = currentPred;
-  const cpuPick = CPU_CHOICES[Math.floor(Math.random() * 3)];
+  const cpuPick = cpuPickSmart();
+  playerHistory.push(player);
+  cpuHistory.push(cpuPick);
 
   // CPU animation
   cpuDisplay.classList.add("shake");
@@ -659,7 +704,7 @@ btnStart.addEventListener("click", () => {
 
     autoInterval = setInterval(() => {
       if (!counting) playRound();
-    }, 4000);
+    }, 5000);
     playRound();
   } else {
     gameRunning = false;
@@ -678,6 +723,8 @@ btnPlay.addEventListener("click", () => {
 
 btnReset.addEventListener("click", () => {
   scores = { player:0, tie:0, cpu:0 };
+  playerHistory.length = 0;
+  cpuHistory.length = 0;
   document.getElementById("score-player").textContent = "0";
   document.getElementById("score-tie").textContent = "0";
   document.getElementById("score-cpu").textContent = "0";
