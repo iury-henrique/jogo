@@ -591,28 +591,69 @@ async function init() {
   }
 }
 
+// Histórico de predições para suavização
+const predBuffer = [];
+const BUFFER_SIZE = 6;      // média dos últimos 5 frames
+const CONFIRM_FRAMES = 6;   // gesto precisa aparecer 3x seguidas para confirmar
+let stableCount = 0;
+let lastRawPred = null;
+
 async function predLoop() {
   if (!loopActive) return;
   webcam.update();
   const preds = await model.predict(webcam.canvas);
 
-  // Boost da tesoura — aumenta o peso dela para ser reconhecida mais facilmente
+  // Boost da tesoura
   const BOOST = { "tesoura": 2.0, "scissors": 2.0 };
   const boosted = preds.map(p => ({
     ...p,
     probability: p.probability * (BOOST[p.className.toLowerCase()] || 1.0)
   }));
 
-  let best = boosted[0];
-  boosted.forEach(p => { if (p.probability > best.probability) best = p; });
-  currentPred = normalize(best.className);
+  // Suavização: média dos últimos BUFFER_SIZE frames
+  predBuffer.push(boosted);
+  if (predBuffer.length > BUFFER_SIZE) predBuffer.shift();
 
-  const displayName = best.className;
-  predName.textContent = (EMOJIS[currentPred] || "") + " " + displayName;
+  // Calcula média de probabilidade por classe
+  const avgProbs = {};
+  boosted.forEach(p => { avgProbs[p.className] = 0; });
+  predBuffer.forEach(frame => {
+    frame.forEach(p => { avgProbs[p.className] += p.probability / predBuffer.length; });
+  });
+
+  // Encontra o melhor após suavização
+  let bestName = boosted[0].className;
+  let bestProb = 0;
+  for (const [name, prob] of Object.entries(avgProbs)) {
+    if (prob > bestProb) { bestProb = prob; bestName = name; }
+  }
+
+  const rawPred = normalize(bestName);
+
+  // Estabilização: só atualiza currentPred se o gesto for consistente
+  if (rawPred === lastRawPred) {
+    stableCount++;
+  } else {
+    stableCount = 1;
+    lastRawPred = rawPred;
+  }
+
+  // Só aceita a predição se aparecer CONFIRM_FRAMES vezes seguidas
+  // E com confiança mínima de 55%
+  if (stableCount >= CONFIRM_FRAMES && bestProb >= 0.60) {
+    currentPred = rawPred;
+  }
+
+  // Atualiza display
+  const displayName = bestName;
+  const conf = Math.round(bestProb * 100);
+  predName.textContent = (EMOJIS[currentPred] || "") + " " + (currentPred ? currentPred.charAt(0).toUpperCase() + currentPred.slice(1) : "—");
   predName.style.color = currentPred === "pedra" ? "#c8f000" : currentPred === "papel" ? "#00e5ff" : currentPred === "tesoura" ? "#ff4d6d" : "#666680";
 
-  for (let i = 0; i < Math.min(preds.length, 3); i++) {
-    const pct = Math.round(preds[i].probability * 100);
+  // Barras com valores suavizados
+  const classNames = boosted.map(p => p.className);
+  for (let i = 0; i < Math.min(classNames.length, 3); i++) {
+    const pct = Math.round((avgProbs[classNames[i]] || 0) * 100);
     const bar = document.getElementById("bar-" + i);
     const pctEl = document.getElementById("pct-" + i);
     if (bar) bar.style.width = pct + "%";
