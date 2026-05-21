@@ -553,8 +553,15 @@ async function predLoop() {
   webcam.update();
   const preds = await model.predict(webcam.canvas);
 
-  let best = preds[0];
-  preds.forEach(p => { if (p.probability > best.probability) best = p; });
+  // Boost da tesoura — aumenta o peso dela para ser reconhecida mais facilmente
+  const BOOST = { "tesoura": 2.0, "scissors": 2.0 };
+  const boosted = preds.map(p => ({
+    ...p,
+    probability: p.probability * (BOOST[p.className.toLowerCase()] || 1.0)
+  }));
+
+  let best = boosted[0];
+  boosted.forEach(p => { if (p.probability > best.probability) best = p; });
   currentPred = normalize(best.className);
 
   const displayName = best.className;
